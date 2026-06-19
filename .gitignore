@@ -1,0 +1,33 @@
+node_modules/
+dist/
+*.send-log.json
+.semcode.db/
+
+# apogee-managed-begin
+# Apogee lifecycle artifacts (private working state)
+apogee_artifacts/
+
+# Apogee local config (per-developer, not shared)
+.mcp.json
+.design-approved
+
+# Apogee runtime data
+.apogee/
+
+# Governance files (uncomment to untrack)
+# AGENTS.md
+# agent-policies/attribution.md
+# apogee-managed-end
+
+# Apogee IDE configs (developer-local, not committed)
+CLAUDE.md
+.cursor/mcp.json
+.cursor/rules/apogee.mdc
+.continue/config.yaml
+.continue/rules/apogee.md
+.opencode/instructions.md
+opencode.json
+.claude/settings.json
+AGENTS.md
+apogee.toml
+agent-policies/
