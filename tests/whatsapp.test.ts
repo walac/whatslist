@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { EventEmitter } from "events";
 import { createWhatsAppClient } from "../src/whatsapp.js";
 
 vi.mock("../src/auth.js", () => ({
@@ -12,7 +13,8 @@ vi.mock("../src/retry.js", () => ({
 import { createSocket } from "../src/auth.js";
 
 function mockSocket(overrides?: Record<string, unknown>) {
-  return {
+  const ev = new EventEmitter();
+  const sock = {
     groupFetchAllParticipating: vi.fn().mockResolvedValue({
       "g1@g.us": { id: "g1@g.us", subject: "Group A" },
       "g2@g.us": { id: "g2@g.us", subject: "Group B" },
@@ -25,8 +27,12 @@ function mockSocket(overrides?: Record<string, unknown>) {
     }),
     sendMessage: vi.fn().mockResolvedValue(undefined),
     end: vi.fn(),
+    ev,
     ...overrides,
   };
+  // Simulate sync completion shortly after creation
+  setTimeout(() => ev.emit("creds.update", { accountSyncCounter: 1 }), 10);
+  return sock;
 }
 
 describe("createWhatsAppClient", () => {

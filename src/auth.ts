@@ -7,6 +7,13 @@ import { mkdirSync, chmodSync, readdirSync, statSync } from "fs";
 import { join } from "path";
 import qrcode from "qrcode-terminal";
 
+const noop = () => {};
+const silentLogger = {
+  level: "silent",
+  trace: noop, debug: noop, info: noop, warn: noop, error: noop, fatal: noop,
+  child() { return this; },
+} as Parameters<typeof makeWASocket>[0]["logger"];
+
 const CONNECTION_TIMEOUT_MS = 120_000;
 
 function ensureSecureDir(dir: string): void {
@@ -37,6 +44,7 @@ export async function createSocket(
   const sock = makeWASocket({
     auth: state,
     printQRInTerminal: false,
+    logger: silentLogger,
   });
 
   sock.ev.on("creds.update", () => {

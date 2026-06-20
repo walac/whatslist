@@ -2,6 +2,7 @@ import { readFile, writeFile, rename } from "fs/promises";
 import type { ContactsFile } from "./types.js";
 
 export function phoneFromJid(jid: string): string {
+  if (jid.endsWith("@lid")) return jid;
   const num = jid.split("@")[0].split(":")[0];
   return `+${num}`;
 }
