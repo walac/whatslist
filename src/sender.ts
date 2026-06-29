@@ -1,6 +1,6 @@
 import { readFile, writeFile, rename } from "fs/promises";
 import { parse, join } from "path";
-import type { SendLog } from "./types.js";
+import type { SendLog, SentMessage } from "./types.js";
 import { loadContacts } from "./contacts.js";
 import type { WhatsAppClient } from "./whatsapp.js";
 
@@ -22,6 +22,29 @@ export interface SendResult {
 function sendLogPath(contactsFile: string): string {
   const { dir, name } = parse(contactsFile);
   return join(dir, name + ".send-log.json");
+}
+
+function messagesPath(contactsFile: string): string {
+  const { dir, name } = parse(contactsFile);
+  return join(dir, name + ".messages.json");
+}
+
+async function loadMessages(path: string): Promise<SentMessage[]> {
+  try {
+    const raw = await readFile(path, "utf-8");
+    return JSON.parse(raw) as SentMessage[];
+  } catch (err: unknown) {
+    if (err instanceof Error && "code" in err && (err as NodeJS.ErrnoException).code === "ENOENT") {
+      return [];
+    }
+    throw err;
+  }
+}
+
+async function saveMessages(path: string, messages: SentMessage[]): Promise<void> {
+  const tmpPath = `${path}.tmp`;
+  await writeFile(tmpPath, JSON.stringify(messages, null, 2), "utf-8");
+  await rename(tmpPath, path);
 }
 
 function validateSendLog(data: unknown): asserts data is SendLog {
@@ -92,6 +115,9 @@ export async function sendBatch(
   const sentSet = new Set(log.sentIds);
   const result: SendResult = { sent: 0, failed: 0, skipped: 0 };
 
+  const msgPath = messagesPath(options.contactsFile);
+  const messages = await loadMessages(msgPath);
+
   let excludedIds: Set<string> | null = null;
   if (options.filterOutFile) {
     const excluded = await loadContacts(options.filterOutFile);
@@ -126,8 +152,9 @@ export async function sendBatch(
       continue;
     }
 
+    let sentMsg: SentMessage | undefined;
     try {
-      await client.sendMessage(contact.id, options.message);
+      sentMsg = await client.sendMessage(contact.id, options.message);
       console.log(`✓ ${displayName}`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -146,6 +173,14 @@ export async function sendBatch(
         `\n⚠ CRITICAL: Sent message to ${displayName} but failed to save send log. Halting to prevent duplicate sends.`,
       );
       throw logErr;
+    }
+
+    if (sentMsg) {
+      messages.push(sentMsg);
+      await saveMessages(msgPath, messages).catch((err) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`⚠ Failed to save message key for ${displayName}: ${msg}`);
+      });
     }
 
     if (!shuttingDown && i < data.contacts.length - 1) {

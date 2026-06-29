@@ -25,7 +25,10 @@ function mockSocket(overrides?: Record<string, unknown>) {
         { id: "222@s.whatsapp.net", admin: null },
       ],
     }),
-    sendMessage: vi.fn().mockResolvedValue(undefined),
+    sendMessage: vi.fn().mockResolvedValue({
+      key: { id: "msg-001", remoteJid: "111@s.whatsapp.net", fromMe: true },
+      messageTimestamp: 1700000000,
+    }),
     end: vi.fn(),
     ev,
     ...overrides,
@@ -109,16 +112,35 @@ describe("createWhatsAppClient", () => {
     await expect(client.getGroups()).rejects.toThrow("Not connected");
   });
 
-  it("sends a message via the socket", async () => {
+  it("sends a message and returns message key", async () => {
     const sock = mockSocket();
     vi.mocked(createSocket).mockResolvedValue(sock as any);
 
     const client = createWhatsAppClient("/fake/auth");
     await client.connect();
-    await client.sendMessage("111@s.whatsapp.net", "Hello!");
+    const result = await client.sendMessage("111@s.whatsapp.net", "Hello!");
 
+    expect(result).toEqual({
+      contactId: "111@s.whatsapp.net",
+      messageId: "msg-001",
+      remoteJid: "111@s.whatsapp.net",
+      timestamp: 1700000000,
+    });
     expect(sock.sendMessage).toHaveBeenCalledWith("111@s.whatsapp.net", {
       text: "Hello!",
     });
+  });
+
+  it("returns undefined when Baileys response has no message key", async () => {
+    const sock = mockSocket({
+      sendMessage: vi.fn().mockResolvedValue({ key: {} }),
+    });
+    vi.mocked(createSocket).mockResolvedValue(sock as any);
+
+    const client = createWhatsAppClient("/fake/auth");
+    await client.connect();
+    const result = await client.sendMessage("111@s.whatsapp.net", "Hello!");
+
+    expect(result).toBeUndefined();
   });
 });

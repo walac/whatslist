@@ -1,7 +1,7 @@
 import type { WASocket, Contact as BaileysContact } from "@whiskeysockets/baileys";
 import { readFile, writeFile, rename } from "fs/promises";
 import { join } from "path";
-import type { Contact } from "./types.js";
+import type { Contact, SentMessage } from "./types.js";
 import { phoneFromJid } from "./contacts.js";
 import { withRetry } from "./retry.js";
 import { createSocket } from "./auth.js";
@@ -10,7 +10,7 @@ export interface WhatsAppClient {
   connect(): Promise<void>;
   getGroups(): Promise<Array<{ id: string; subject: string }>>;
   getGroupContacts(groupId: string): Promise<Contact[]>;
-  sendMessage(contactId: string, text: string): Promise<void>;
+  sendMessage(contactId: string, text: string): Promise<SentMessage | undefined>;
   disconnect(): Promise<void>;
 }
 
@@ -176,7 +176,7 @@ export function createWhatsAppClient(authDir: string): WhatsAppClient {
 
     async sendMessage(contactId: string, text: string) {
       if (!sock) throw new Error("Not connected");
-      await withRetry(
+      const result = await withRetry(
         () => {
           if (!sock) throw new Error("Not connected");
           return sock.sendMessage(contactId, { text });
@@ -189,6 +189,15 @@ export function createWhatsAppClient(authDir: string): WhatsAppClient {
           },
         },
       );
+      if (!result?.key?.id || !result.key.remoteJid) return undefined;
+      return {
+        contactId,
+        messageId: result.key.id,
+        remoteJid: result.key.remoteJid,
+        timestamp: typeof result.messageTimestamp === "number"
+          ? result.messageTimestamp
+          : Number(result.messageTimestamp ?? 0),
+      };
     },
 
     async disconnect() {

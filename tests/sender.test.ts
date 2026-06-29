@@ -4,7 +4,20 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { sendBatch, resetShutdown, type SendOptions } from "../src/sender.js";
 import type { WhatsAppClient } from "../src/whatsapp.js";
-import type { ContactsFile } from "../src/types.js";
+import type { ContactsFile, SentMessage } from "../src/types.js";
+
+let msgCounter = 0;
+
+function mockSendMessage(): (contactId: string, text: string) => Promise<SentMessage> {
+  return vi.fn((contactId: string) =>
+    Promise.resolve({
+      contactId,
+      messageId: `msg-${++msgCounter}`,
+      remoteJid: contactId,
+      timestamp: 1700000000 + msgCounter,
+    }),
+  );
+}
 
 function mockClient(
   overrides?: Partial<WhatsAppClient>,
@@ -13,7 +26,7 @@ function mockClient(
     connect: vi.fn(),
     getGroups: vi.fn(),
     getGroupContacts: vi.fn(),
-    sendMessage: vi.fn().mockResolvedValue(undefined),
+    sendMessage: mockSendMessage(),
     disconnect: vi.fn(),
     ...overrides,
   };
@@ -49,6 +62,7 @@ describe("sendBatch", () => {
 
   beforeEach(async () => {
     tmpDir = await mkdtemp(join(tmpdir(), "whatslist-test-"));
+    msgCounter = 0;
   });
 
   afterEach(async () => {
@@ -135,12 +149,13 @@ describe("sendBatch", () => {
     expect(client.sendMessage).toHaveBeenCalledTimes(2);
   });
 
-  it("continues after per-contact failure", async () => {
-    const sendMessage = vi
-      .fn()
-      .mockResolvedValueOnce(undefined)
+  it("continues after per-contact failure and saves message keys for successes", async () => {
+    const sendMessage = mockSendMessage() as ReturnType<typeof vi.fn>;
+    sendMessage
+      .mockReset()
+      .mockResolvedValueOnce({ contactId: "111@s.whatsapp.net", messageId: "m1", remoteJid: "111@s.whatsapp.net", timestamp: 1700000001 })
       .mockRejectedValueOnce(new Error("unreachable"))
-      .mockResolvedValueOnce(undefined);
+      .mockResolvedValueOnce({ contactId: "333@s.whatsapp.net", messageId: "m3", remoteJid: "333@s.whatsapp.net", timestamp: 1700000003 });
     const client = mockClient({ sendMessage });
     const filePath = await writeContacts();
 
@@ -149,6 +164,12 @@ describe("sendBatch", () => {
     expect(result.sent).toBe(2);
     expect(result.failed).toBe(1);
     expect(sendMessage).toHaveBeenCalledTimes(3);
+
+    const msgPath = filePath.replace(/\.json$/, ".messages.json");
+    const messages = JSON.parse(await readFile(msgPath, "utf-8"));
+    expect(messages).toHaveLength(2);
+    expect(messages[0].messageId).toBe("m1");
+    expect(messages[1].messageId).toBe("m3");
   });
 
   it("persists send log after each successful send", async () => {
@@ -163,6 +184,23 @@ describe("sendBatch", () => {
     expect(log.sentIds).toContain("111@s.whatsapp.net");
     expect(log.sentIds).toContain("222@s.whatsapp.net");
     expect(log.sentIds).toContain("333@s.whatsapp.net");
+  });
+
+  it("persists message keys to .messages.json after each send", async () => {
+    const client = mockClient();
+    const filePath = await writeContacts();
+
+    await sendBatch(client, opts(filePath));
+
+    const msgPath = filePath.replace(/\.json$/, ".messages.json");
+    const messages = JSON.parse(await readFile(msgPath, "utf-8"));
+    expect(messages).toHaveLength(3);
+    expect(messages[0]).toMatchObject({
+      contactId: "111@s.whatsapp.net",
+      remoteJid: "111@s.whatsapp.net",
+    });
+    expect(messages[0].messageId).toBeDefined();
+    expect(messages[0].timestamp).toBeGreaterThan(0);
   });
 
   it("skips contacts listed in filter-out file", async () => {

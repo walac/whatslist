@@ -18,3 +18,10 @@ export interface SendLog {
   sentIds: string[];
   startedAt: string;
 }
+
+export interface SentMessage {
+  contactId: string;
+  messageId: string;
+  remoteJid: string;
+  timestamp: number;
+}
