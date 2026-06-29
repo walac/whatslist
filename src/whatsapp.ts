@@ -11,6 +11,7 @@ export interface WhatsAppClient {
   getGroups(): Promise<Array<{ id: string; subject: string }>>;
   getGroupContacts(groupId: string): Promise<Contact[]>;
   sendMessage(contactId: string, text: string): Promise<SentMessage | undefined>;
+  deleteMessage(remoteJid: string, messageId: string, timestamp: number): Promise<void>;
   disconnect(): Promise<void>;
 }
 
@@ -198,6 +199,32 @@ export function createWhatsAppClient(authDir: string): WhatsAppClient {
           ? result.messageTimestamp
           : Number(result.messageTimestamp ?? 0),
       };
+    },
+
+    async deleteMessage(remoteJid: string, messageId: string, timestamp: number) {
+      if (!sock) throw new Error("Not connected");
+      await withRetry(
+        () => {
+          if (!sock) throw new Error("Not connected");
+          return sock.chatModify(
+            {
+              deleteForMe: {
+                deleteMedia: false,
+                key: { id: messageId, fromMe: true, remoteJid },
+                timestamp,
+              },
+            },
+            remoteJid,
+          );
+        },
+        {
+          shouldRetry: (err) => {
+            if (err.message === "Not connected") return false;
+            const msg = err.message.toLowerCase();
+            return !msg.includes("not found");
+          },
+        },
+      );
     },
 
     async disconnect() {

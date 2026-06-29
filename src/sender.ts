@@ -19,6 +19,11 @@ export interface SendResult {
   skipped: number;
 }
 
+export interface DeleteResult {
+  deleted: number;
+  failed: number;
+}
+
 function sendLogPath(contactsFile: string): string {
   const { dir, name } = parse(contactsFile);
   return join(dir, name + ".send-log.json");
@@ -29,7 +34,7 @@ function messagesPath(contactsFile: string): string {
   return join(dir, name + ".messages.json");
 }
 
-async function loadMessages(path: string): Promise<SentMessage[]> {
+export async function loadMessages(path: string): Promise<SentMessage[]> {
   try {
     const raw = await readFile(path, "utf-8");
     return JSON.parse(raw) as SentMessage[];
@@ -184,6 +189,63 @@ export async function sendBatch(
     }
 
     if (!shuttingDown && i < data.contacts.length - 1) {
+      await randomDelay(minDelay, maxDelay);
+    }
+  }
+
+  return result;
+}
+
+export interface DeleteOptions {
+  messagesFile: string;
+  minDelayMs?: number;
+  maxDelayMs?: number;
+}
+
+export async function deleteBatch(
+  client: WhatsAppClient,
+  options: DeleteOptions,
+): Promise<DeleteResult> {
+  const minDelay = options.minDelayMs ?? 1000;
+  const maxDelay = options.maxDelayMs ?? 3000;
+
+  const messages = await loadMessages(options.messagesFile);
+  if (messages.length === 0) {
+    console.log("No messages to delete.");
+    return { deleted: 0, failed: 0 };
+  }
+
+  const deletedIds = new Set<string>();
+  const result: DeleteResult = { deleted: 0, failed: 0 };
+
+  for (let i = 0; i < messages.length; i++) {
+    if (shuttingDown) {
+      console.log("\nShutting down gracefully...");
+      break;
+    }
+
+    const msg = messages[i];
+    const displayName = msg.contactId.split("@")[0];
+
+    try {
+      await client.deleteMessage(msg.remoteJid, msg.messageId, msg.timestamp);
+      console.log(`✓ deleted message to ${displayName}`);
+      deletedIds.add(msg.messageId);
+      result.deleted++;
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.log(`✗ ${displayName} — ${errMsg}`);
+      result.failed++;
+      continue;
+    }
+
+    const remaining = messages.filter((m) => !deletedIds.has(m.messageId));
+    await saveMessages(options.messagesFile, remaining).catch((err) => {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error(`⚠ Failed to update messages file: ${errMsg}`);
+    });
+
+    if (!shuttingDown && i < messages.length - 1) {
       await randomDelay(minDelay, maxDelay);
     }
   }

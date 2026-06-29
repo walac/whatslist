@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, writeFile, readFile } from "fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";
-import { sendBatch, resetShutdown, type SendOptions } from "../src/sender.js";
+import { sendBatch, deleteBatch, resetShutdown, type SendOptions } from "../src/sender.js";
 import type { WhatsAppClient } from "../src/whatsapp.js";
 import type { ContactsFile, SentMessage } from "../src/types.js";
 
@@ -27,6 +27,7 @@ function mockClient(
     getGroups: vi.fn(),
     getGroupContacts: vi.fn(),
     sendMessage: mockSendMessage(),
+    deleteMessage: vi.fn().mockResolvedValue(undefined),
     disconnect: vi.fn(),
     ...overrides,
   };
@@ -269,5 +270,90 @@ describe("sendBatch", () => {
     const logMessages = consoleSpy.mock.calls.map((c) => c[0] as string);
     expect(logMessages.some((m) => m.includes("+333"))).toBe(true);
     consoleSpy.mockRestore();
+  });
+});
+
+describe("deleteBatch", () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "whatslist-test-"));
+  });
+
+  afterEach(async () => {
+    resetShutdown();
+    await rm(tmpDir, { recursive: true });
+  });
+
+  const sampleMessages: SentMessage[] = [
+    { contactId: "111@s.whatsapp.net", messageId: "m1", remoteJid: "111@s.whatsapp.net", timestamp: 1700000001 },
+    { contactId: "222@s.whatsapp.net", messageId: "m2", remoteJid: "222@s.whatsapp.net", timestamp: 1700000002 },
+    { contactId: "333@s.whatsapp.net", messageId: "m3", remoteJid: "333@s.whatsapp.net", timestamp: 1700000003 },
+  ];
+
+  async function writeMessages(): Promise<string> {
+    const filePath = join(tmpDir, "contacts.messages.json");
+    await writeFile(filePath, JSON.stringify(sampleMessages), "utf-8");
+    return filePath;
+  }
+
+  it("deletes all messages and empties the file", async () => {
+    const client = mockClient();
+    const filePath = await writeMessages();
+
+    const result = await deleteBatch(client, {
+      messagesFile: filePath,
+      minDelayMs: 0,
+      maxDelayMs: 0,
+    });
+
+    expect(result.deleted).toBe(3);
+    expect(result.failed).toBe(0);
+    expect(client.deleteMessage).toHaveBeenCalledTimes(3);
+    expect(client.deleteMessage).toHaveBeenCalledWith(
+      "111@s.whatsapp.net", "m1", 1700000001,
+    );
+
+    const remaining = JSON.parse(await readFile(filePath, "utf-8"));
+    expect(remaining).toHaveLength(0);
+  });
+
+  it("continues after per-message failure and keeps failed entries", async () => {
+    const deleteMessage = vi
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("server error"))
+      .mockResolvedValueOnce(undefined);
+    const client = mockClient({ deleteMessage });
+    const filePath = await writeMessages();
+
+    const result = await deleteBatch(client, {
+      messagesFile: filePath,
+      minDelayMs: 0,
+      maxDelayMs: 0,
+    });
+
+    expect(result.deleted).toBe(2);
+    expect(result.failed).toBe(1);
+
+    const remaining = JSON.parse(await readFile(filePath, "utf-8"));
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0].messageId).toBe("m2");
+  });
+
+  it("returns zeros for empty messages file", async () => {
+    const filePath = join(tmpDir, "empty.messages.json");
+    await writeFile(filePath, "[]", "utf-8");
+
+    const client = mockClient();
+    const result = await deleteBatch(client, {
+      messagesFile: filePath,
+      minDelayMs: 0,
+      maxDelayMs: 0,
+    });
+
+    expect(result.deleted).toBe(0);
+    expect(result.failed).toBe(0);
+    expect(client.deleteMessage).not.toHaveBeenCalled();
   });
 });

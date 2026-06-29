@@ -7,7 +7,7 @@ import { existsSync } from "fs";
 import { readFile, rm } from "fs/promises";
 import { createWhatsAppClient } from "./whatsapp.js";
 import { saveContacts } from "./contacts.js";
-import { sendBatch, requestShutdown, shuttingDown } from "./sender.js";
+import { sendBatch, deleteBatch, requestShutdown, shuttingDown } from "./sender.js";
 import { getAuthDir } from "./config.js";
 import type { ContactsFile } from "./types.js";
 
@@ -185,6 +185,36 @@ program
       }
     },
   );
+
+program
+  .command("delete")
+  .description("Delete previously sent messages from your account")
+  .requiredOption("--file <path>", "Path to .messages.json file")
+  .action(async (opts: { file: string }) => {
+    if (!existsSync(opts.file)) {
+      console.error(`Messages file not found: ${opts.file}`);
+      process.exit(1);
+    }
+
+    const authDir = getAuthDir();
+    requireAuth(authDir);
+
+    const client = createWhatsAppClient(authDir);
+    try {
+      console.log("Connecting to WhatsApp...");
+      await client.connect();
+
+      const result = await deleteBatch(client, {
+        messagesFile: opts.file,
+      });
+
+      console.log(
+        `\nDone: ${result.deleted} deleted, ${result.failed} failed`,
+      );
+    } finally {
+      await client.disconnect();
+    }
+  });
 
 program.parseAsync().catch((err: unknown) => {
   console.error(err instanceof Error ? err.message : String(err));

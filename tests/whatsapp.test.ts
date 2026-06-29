@@ -29,6 +29,7 @@ function mockSocket(overrides?: Record<string, unknown>) {
       key: { id: "msg-001", remoteJid: "111@s.whatsapp.net", fromMe: true },
       messageTimestamp: 1700000000,
     }),
+    chatModify: vi.fn().mockResolvedValue(undefined),
     end: vi.fn(),
     ev,
     ...overrides,
@@ -142,5 +143,25 @@ describe("createWhatsAppClient", () => {
     const result = await client.sendMessage("111@s.whatsapp.net", "Hello!");
 
     expect(result).toBeUndefined();
+  });
+
+  it("deletes a message via chatModify", async () => {
+    const sock = mockSocket();
+    vi.mocked(createSocket).mockResolvedValue(sock as any);
+
+    const client = createWhatsAppClient("/fake/auth");
+    await client.connect();
+    await client.deleteMessage("111@s.whatsapp.net", "msg-001", 1700000000);
+
+    expect(sock.chatModify).toHaveBeenCalledWith(
+      {
+        deleteForMe: {
+          deleteMedia: false,
+          key: { id: "msg-001", fromMe: true, remoteJid: "111@s.whatsapp.net" },
+          timestamp: 1700000000,
+        },
+      },
+      "111@s.whatsapp.net",
+    );
   });
 });
