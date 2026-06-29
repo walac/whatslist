@@ -121,6 +121,8 @@ program
   .option("--message <text>", "Message text to send")
   .option("--message-file <path>", "Path to file containing message text")
   .option("--filter-out <path>", "Path to contacts JSON file of people to exclude")
+  .option("--min-delay <seconds>", "Minimum delay between sends in seconds", "15")
+  .option("--max-delay <seconds>", "Maximum delay between sends in seconds", "45")
   .option("--dry-run", "Preview recipients without sending", false)
   .action(
     async (opts: {
@@ -128,6 +130,8 @@ program
       message?: string;
       messageFile?: string;
       filterOut?: string;
+      minDelay: string;
+      maxDelay: string;
       dryRun: boolean;
     }) => {
       if (opts.message && opts.messageFile) {
@@ -158,6 +162,13 @@ program
         process.exit(1);
       }
 
+      const minDelayMs = Number(opts.minDelay) * 1000;
+      const maxDelayMs = Number(opts.maxDelay) * 1000;
+      if (!isFinite(minDelayMs) || !isFinite(maxDelayMs) || minDelayMs < 0 || maxDelayMs < 0) {
+        console.error("Delay values must be non-negative numbers.");
+        process.exit(1);
+      }
+
       const client = opts.dryRun ? null : (() => {
         const authDir = getAuthDir();
         requireAuth(authDir);
@@ -175,6 +186,8 @@ program
           message,
           dryRun: opts.dryRun,
           filterOutFile: opts.filterOut,
+          minDelayMs,
+          maxDelayMs,
         });
 
         console.log(

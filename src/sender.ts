@@ -90,6 +90,11 @@ async function saveSendLog(path: string, log: SendLog): Promise<void> {
   await rename(tmpPath, path);
 }
 
+export function uniquifyMessage(message: string): string {
+  const suffix = Math.floor(Math.random() * 1_000_000_000).toString().padStart(9, "0");
+  return `${message}\n\n${suffix}`;
+}
+
 function randomDelay(minMs: number, maxMs: number): Promise<void> {
   const effectiveMax = Math.max(minMs, maxMs);
   if (effectiveMax <= 0) return Promise.resolve();
@@ -111,8 +116,8 @@ export async function sendBatch(
   client: WhatsAppClient | null,
   options: SendOptions,
 ): Promise<SendResult> {
-  const minDelay = options.minDelayMs ?? 3000;
-  const maxDelay = options.maxDelayMs ?? 7000;
+  const minDelay = options.minDelayMs ?? 15000;
+  const maxDelay = options.maxDelayMs ?? 45000;
 
   const data = await loadContacts(options.contactsFile);
   const logPath = sendLogPath(options.contactsFile);
@@ -157,9 +162,10 @@ export async function sendBatch(
       continue;
     }
 
+    const personalizedMessage = uniquifyMessage(options.message);
     let sentMsg: SentMessage | undefined;
     try {
-      sentMsg = await client.sendMessage(contact.id, options.message);
+      sentMsg = await client.sendMessage(contact.id, personalizedMessage);
       console.log(`✓ ${displayName}`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

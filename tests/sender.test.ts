@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, writeFile, readFile } from "fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";
-import { sendBatch, deleteBatch, resetShutdown, type SendOptions } from "../src/sender.js";
+import { sendBatch, deleteBatch, uniquifyMessage, resetShutdown, type SendOptions } from "../src/sender.js";
 import type { WhatsAppClient } from "../src/whatsapp.js";
 import type { ContactsFile, SentMessage } from "../src/types.js";
 
@@ -58,6 +58,18 @@ const sampleContacts: ContactsFile = {
   ],
 };
 
+describe("uniquifyMessage", () => {
+  it("appends a numeric suffix after two newlines", () => {
+    const result = uniquifyMessage("Hello!");
+    expect(result).toMatch(/^Hello!\n\n\d{9}$/);
+  });
+
+  it("produces different suffixes across calls", () => {
+    const results = new Set(Array.from({ length: 50 }, () => uniquifyMessage("Hi")));
+    expect(results.size).toBeGreaterThan(1);
+  });
+});
+
 describe("sendBatch", () => {
   let tmpDir: string;
 
@@ -98,10 +110,9 @@ describe("sendBatch", () => {
     expect(result.failed).toBe(0);
     expect(result.skipped).toBe(0);
     expect(client.sendMessage).toHaveBeenCalledTimes(3);
-    expect(client.sendMessage).toHaveBeenCalledWith(
-      "111@s.whatsapp.net",
-      "Hello!",
-    );
+    const firstCall = (client.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(firstCall[0]).toBe("111@s.whatsapp.net");
+    expect(firstCall[1]).toMatch(/^Hello!\n\n\d{9}$/);
   });
 
   it("skips contacts in dry-run mode", async () => {
@@ -227,10 +238,9 @@ describe("sendBatch", () => {
     expect(result.skipped).toBe(2);
     expect(result.sent).toBe(1);
     expect(client.sendMessage).toHaveBeenCalledTimes(1);
-    expect(client.sendMessage).toHaveBeenCalledWith(
-      "222@s.whatsapp.net",
-      "Hello!",
-    );
+    const call = (client.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call[0]).toBe("222@s.whatsapp.net");
+    expect(call[1]).toMatch(/^Hello!\n\n\d{9}$/);
   });
 
   it("throws on corrupted send log missing sentIds", async () => {
@@ -270,6 +280,19 @@ describe("sendBatch", () => {
     const logMessages = consoleSpy.mock.calls.map((c) => c[0] as string);
     expect(logMessages.some((m) => m.includes("+333"))).toBe(true);
     consoleSpy.mockRestore();
+  });
+
+  it("sends uniquified messages with numeric suffix", async () => {
+    const client = mockClient();
+    const filePath = await writeContacts();
+
+    await sendBatch(client, opts(filePath));
+
+    const calls = (client.sendMessage as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls).toHaveLength(3);
+    for (const [, text] of calls) {
+      expect(text).toMatch(/^Hello!\n\n\d{9}$/);
+    }
   });
 });
 
