@@ -1,4 +1,4 @@
-import type { WASocket, Contact as BaileysContact } from "@whiskeysockets/baileys";
+import { DisconnectReason, type WASocket, type Contact as BaileysContact } from "@whiskeysockets/baileys";
 import { readFile, writeFile, rename } from "fs/promises";
 import { join } from "path";
 import type { Contact, SentMessage } from "./types.js";
@@ -66,6 +66,89 @@ export function createWhatsAppClient(authDir: string): WhatsAppClient {
   const contactStore = new Map<string, StoredName>();
   let dirty = false;
 
+  let connected: Promise<void> = Promise.resolve();
+  let resolveConnected: (() => void) | null = null;
+  let rejectConnected: ((err: Error) => void) | null = null;
+  let closed = false;
+
+  function registerContactListeners(socket: WASocket): void {
+    socket.ev.on("contacts.upsert", mergeContacts);
+    socket.ev.on("contacts.update", mergeContacts);
+    socket.ev.on("messaging-history.set", ({ contacts }) => {
+      if (contacts) mergeContacts(contacts);
+    });
+  }
+
+  function setupConnectionMonitor(socket: WASocket): void {
+    socket.ev.on("connection.update", (update) => {
+      const { connection, lastDisconnect } = update;
+      if (connection !== "close" || closed) return;
+
+      const statusCode =
+        (lastDisconnect?.error as { output?: { statusCode?: number } })?.output?.statusCode;
+      const reason = lastDisconnect?.error?.message ?? "unknown reason";
+
+      (socket.ev as unknown as NodeJS.EventEmitter).removeAllListeners();
+      socket.end(undefined);
+      sock = null;
+
+      connected = new Promise((resolve, reject) => {
+        resolveConnected = resolve;
+        rejectConnected = reject;
+      });
+
+      if (statusCode === DisconnectReason.loggedOut) {
+        console.error("\nLogged out from WhatsApp. Cannot reconnect.");
+        rejectConnected!(new Error("Logged out"));
+        return;
+      }
+
+      console.log(`\nConnection lost: ${reason}. Attempting to reconnect...`);
+      attemptReconnect().catch(() => {});
+    });
+  }
+
+  async function attemptReconnect(): Promise<void> {
+    const maxAttempts = 5;
+    const baseDelay = 2000;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      if (closed) {
+        rejectConnected?.(new Error("Client disconnected"));
+        return;
+      }
+
+      const delay = baseDelay * 2 ** attempt;
+      console.log(`  Reconnect attempt ${attempt + 1}/${maxAttempts} in ${delay / 1000}s...`);
+      await new Promise((r) => setTimeout(r, delay));
+      if (closed) {
+        rejectConnected?.(new Error("Client disconnected"));
+        return;
+      }
+
+      try {
+        const newSock = await createSocket(authDir);
+        sock = newSock;
+        registerContactListeners(newSock);
+        setupConnectionMonitor(newSock);
+        console.log("  Reconnected successfully.");
+        resolveConnected?.();
+        return;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`  Reconnect attempt ${attempt + 1} failed: ${msg}`);
+        if (msg.includes("Logged out")) {
+          rejectConnected?.(err instanceof Error ? err : new Error(msg));
+          return;
+        }
+      }
+    }
+
+    const err = new Error("Failed to reconnect after maximum attempts");
+    console.error(`\n${err.message}`);
+    rejectConnected?.(err);
+  }
+
   function mergeContacts(contacts: Partial<BaileysContact>[]): void {
     for (const c of contacts) {
       if (!c.id) continue;
@@ -95,11 +178,8 @@ export function createWhatsAppClient(authDir: string): WhatsAppClient {
       const persisted = await loadContactsDb(dbPath);
       for (const [k, v] of persisted) contactStore.set(k, v);
 
-      sock.ev.on("contacts.upsert", mergeContacts);
-      sock.ev.on("contacts.update", mergeContacts);
-      sock.ev.on("messaging-history.set", ({ contacts }) => {
-        if (contacts) mergeContacts(contacts);
-      });
+      registerContactListeners(sock);
+      setupConnectionMonitor(sock);
 
       syncComplete = new Promise<void>((resolve) => {
         let resolved = false;
@@ -122,8 +202,10 @@ export function createWhatsAppClient(authDir: string): WhatsAppClient {
     },
 
     async getGroups() {
+      await connected;
       if (!sock) throw new Error("Not connected");
-      const groups = await withRetry(() => {
+      const groups = await withRetry(async () => {
+        await connected;
         if (!sock) throw new Error("Not connected");
         return sock.groupFetchAllParticipating();
       });
@@ -134,11 +216,13 @@ export function createWhatsAppClient(authDir: string): WhatsAppClient {
     },
 
     async getGroupContacts(groupId: string) {
+      await connected;
       if (!sock) throw new Error("Not connected");
 
       await syncComplete;
 
-      const metadata = await withRetry(() => {
+      const metadata = await withRetry(async () => {
+        await connected;
         if (!sock) throw new Error("Not connected");
         return sock.groupMetadata(groupId);
       });
@@ -176,16 +260,18 @@ export function createWhatsAppClient(authDir: string): WhatsAppClient {
     },
 
     async sendMessage(contactId: string, text: string) {
+      await connected;
       if (!sock) throw new Error("Not connected");
       const result = await withRetry(
-        () => {
+        async () => {
+          await connected;
           if (!sock) throw new Error("Not connected");
           return sock.sendMessage(contactId, { text });
         },
         {
           shouldRetry: (err) => {
-            if (err.message === "Not connected") return false;
             const msg = err.message.toLowerCase();
+            if (msg.includes("not connected") || msg.includes("logged out") || msg.includes("disconnected") || msg.includes("reconnect")) return false;
             return !msg.includes("not on whatsapp") && !msg.includes("blocked");
           },
         },
@@ -202,9 +288,11 @@ export function createWhatsAppClient(authDir: string): WhatsAppClient {
     },
 
     async deleteMessage(remoteJid: string, messageId: string, timestamp: number) {
+      await connected;
       if (!sock) throw new Error("Not connected");
       await withRetry(
-        () => {
+        async () => {
+          await connected;
           if (!sock) throw new Error("Not connected");
           return sock.chatModify(
             {
@@ -219,8 +307,8 @@ export function createWhatsAppClient(authDir: string): WhatsAppClient {
         },
         {
           shouldRetry: (err) => {
-            if (err.message === "Not connected") return false;
             const msg = err.message.toLowerCase();
+            if (msg.includes("not connected") || msg.includes("logged out") || msg.includes("disconnected") || msg.includes("reconnect")) return false;
             return !msg.includes("not found");
           },
         },
@@ -228,6 +316,8 @@ export function createWhatsAppClient(authDir: string): WhatsAppClient {
     },
 
     async disconnect() {
+      closed = true;
+      rejectConnected?.(new Error("Client disconnected"));
       if (sock) {
         if (forceSync) forceSync();
         await syncComplete;
