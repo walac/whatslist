@@ -243,6 +243,32 @@ describe("sendBatch", () => {
     expect(call[1]).toMatch(/^Hello!\n\n\d{9}$/);
   });
 
+  it("accepts send-log format for filter-out file", async () => {
+    const client = mockClient();
+    const filePath = await writeContacts();
+
+    const filterFile = join(tmpDir, "previous.send-log.json");
+    await writeFile(
+      filterFile,
+      JSON.stringify({
+        sentIds: ["111@s.whatsapp.net", "333@s.whatsapp.net"],
+        startedAt: "2026-06-19T00:00:00Z",
+      }),
+      "utf-8",
+    );
+
+    const result = await sendBatch(
+      client,
+      opts(filePath, { filterOutFile: filterFile }),
+    );
+
+    expect(result.skipped).toBe(2);
+    expect(result.sent).toBe(1);
+    expect(client.sendMessage).toHaveBeenCalledTimes(1);
+    const call = (client.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call[0]).toBe("222@s.whatsapp.net");
+  });
+
   it("throws on corrupted send log missing sentIds", async () => {
     const client = mockClient();
     const filePath = await writeContacts();

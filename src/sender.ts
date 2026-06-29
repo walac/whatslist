@@ -130,8 +130,13 @@ export async function sendBatch(
 
   let excludedIds: Set<string> | null = null;
   if (options.filterOutFile) {
-    const excluded = await loadContacts(options.filterOutFile);
-    excludedIds = new Set(excluded.contacts.map((c) => c.id));
+    try {
+      const filterLog = await loadSendLog(options.filterOutFile);
+      excludedIds = new Set(filterLog.sentIds);
+    } catch {
+      const excluded = await loadContacts(options.filterOutFile);
+      excludedIds = new Set(excluded.contacts.map((c) => c.id));
+    }
   }
 
   for (let i = 0; i < data.contacts.length; i++) {

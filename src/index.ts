@@ -120,7 +120,7 @@ program
   .requiredOption("--file <path>", "Path to contacts JSON file")
   .option("--message <text>", "Message text to send")
   .option("--message-file <path>", "Path to file containing message text")
-  .option("--filter-out <path>", "Path to contacts JSON file of people to exclude")
+  .option("--filter-out <path>", "Path to contacts or send-log JSON file of people to exclude")
   .option("--min-delay <seconds>", "Minimum delay between sends in seconds", "15")
   .option("--max-delay <seconds>", "Maximum delay between sends in seconds", "45")
   .option("--dry-run", "Preview recipients without sending", false)
@@ -166,6 +166,10 @@ program
       const maxDelayMs = Number(opts.maxDelay) * 1000;
       if (!isFinite(minDelayMs) || !isFinite(maxDelayMs) || minDelayMs < 0 || maxDelayMs < 0) {
         console.error("Delay values must be non-negative numbers.");
+        process.exit(1);
+      }
+      if (minDelayMs > maxDelayMs) {
+        console.error("--min-delay must not exceed --max-delay.");
         process.exit(1);
       }
 
