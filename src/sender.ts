@@ -99,7 +99,7 @@ export function uniquifyMessage(message: string): string {
 function randomDelay(minMs: number, maxMs: number): Promise<void> {
   const effectiveMax = Math.max(minMs, maxMs);
   if (effectiveMax <= 0) return Promise.resolve();
-  const delay = minMs + Math.random() * (effectiveMax - minMs);
+  const delay = minMs + Math.random() ** 0.5 * (effectiveMax - minMs);
   return new Promise((resolve) => setTimeout(resolve, delay));
 }
 
