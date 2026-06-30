@@ -92,8 +92,10 @@ async function saveSendLog(path: string, log: SendLog): Promise<void> {
 }
 
 export function uniquifyMessage(message: string): string {
-  const suffix = Math.floor(Math.random() * 1_000_000_000).toString().padStart(9, "0");
-  return `${message}\n\n${suffix}`;
+  return message.replace(/\{([^}]+)\}/g, (_, group: string) => {
+    const alternatives = group.split("|");
+    return alternatives[Math.floor(Math.random() * alternatives.length)];
+  });
 }
 
 function randomDelay(minMs: number, maxMs: number): Promise<void> {

@@ -59,14 +59,23 @@ const sampleContacts: ContactsFile = {
 };
 
 describe("uniquifyMessage", () => {
-  it("appends a numeric suffix after two newlines", () => {
-    const result = uniquifyMessage("Hello!");
-    expect(result).toMatch(/^Hello!\n\n\d{9}$/);
+  it("picks one alternative from each variation slot", () => {
+    const result = uniquifyMessage("{Olá|Oi}, {tudo bem|como vai}?");
+    expect(result).toMatch(/^(Olá|Oi), (tudo bem|como vai)\?$/);
   });
 
-  it("produces different suffixes across calls", () => {
-    const results = new Set(Array.from({ length: 50 }, () => uniquifyMessage("Hi")));
+  it("returns message unchanged when no slots present", () => {
+    expect(uniquifyMessage("Hello!")).toBe("Hello!");
+  });
+
+  it("produces different variants across calls", () => {
+    const template = "{A|B|C} {X|Y|Z}";
+    const results = new Set(Array.from({ length: 50 }, () => uniquifyMessage(template)));
     expect(results.size).toBeGreaterThan(1);
+  });
+
+  it("handles single-alternative slots as constants", () => {
+    expect(uniquifyMessage("{only}")).toBe("only");
   });
 });
 
@@ -112,7 +121,7 @@ describe("sendBatch", () => {
     expect(client.sendMessage).toHaveBeenCalledTimes(3);
     const firstCall = (client.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(firstCall[0]).toBe("111@s.whatsapp.net");
-    expect(firstCall[1]).toMatch(/^Hello!\n\n\d{9}$/);
+    expect(firstCall[1]).toBe("Hello!");
   });
 
   it("skips contacts in dry-run mode", async () => {
@@ -240,7 +249,7 @@ describe("sendBatch", () => {
     expect(client.sendMessage).toHaveBeenCalledTimes(1);
     const call = (client.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(call[0]).toBe("222@s.whatsapp.net");
-    expect(call[1]).toMatch(/^Hello!\n\n\d{9}$/);
+    expect(call[1]).toBe("Hello!");
   });
 
   it("accepts send-log format for filter-out file", async () => {
@@ -363,16 +372,16 @@ describe("sendBatch", () => {
     expect(call[0]).toBe("222@s.whatsapp.net");
   });
 
-  it("sends uniquified messages with numeric suffix", async () => {
+  it("expands variation slots in sent messages", async () => {
     const client = mockClient();
     const filePath = await writeContacts();
 
-    await sendBatch(client, opts(filePath));
+    await sendBatch(client, opts(filePath, { message: "{Hi|Hey} there" }));
 
     const calls = (client.sendMessage as ReturnType<typeof vi.fn>).mock.calls;
     expect(calls).toHaveLength(3);
     for (const [, text] of calls) {
-      expect(text).toMatch(/^Hello!\n\n\d{9}$/);
+      expect(text).toMatch(/^(Hi|Hey) there$/);
     }
   });
 });
