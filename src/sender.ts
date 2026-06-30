@@ -9,6 +9,7 @@ export interface SendOptions {
   message: string;
   dryRun: boolean;
   filterOutFile?: string;
+  maxSends?: number;
   minDelayMs?: number;
   maxDelayMs?: number;
 }
@@ -142,6 +143,11 @@ export async function sendBatch(
   for (let i = 0; i < data.contacts.length; i++) {
     if (shuttingDown) {
       console.log("\nShutting down gracefully...");
+      break;
+    }
+
+    if (options.maxSends != null && result.sent >= options.maxSends) {
+      console.log(`\nReached send limit of ${options.maxSends}.`);
       break;
     }
 

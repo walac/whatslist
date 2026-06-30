@@ -308,6 +308,61 @@ describe("sendBatch", () => {
     consoleSpy.mockRestore();
   });
 
+  it("maxSends has no effect in dry-run mode", async () => {
+    const client = mockClient();
+    const filePath = await writeContacts();
+
+    const result = await sendBatch(
+      client,
+      opts(filePath, { dryRun: true, maxSends: 1 }),
+    );
+
+    expect(result.skipped).toBe(3);
+    expect(result.sent).toBe(0);
+    expect(client.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("stops after maxSends successful sends, not counting skips", async () => {
+    const client = mockClient();
+    const filePath = await writeContacts();
+
+    const result = await sendBatch(
+      client,
+      opts(filePath, { maxSends: 2 }),
+    );
+
+    expect(result.sent).toBe(2);
+    expect(result.skipped).toBe(0);
+    expect(result.failed).toBe(0);
+    expect(client.sendMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it("maxSends does not count filtered-out contacts", async () => {
+    const client = mockClient();
+    const filePath = await writeContacts();
+
+    const filterFile = join(tmpDir, "exclude.send-log.json");
+    await writeFile(
+      filterFile,
+      JSON.stringify({
+        sentIds: ["111@s.whatsapp.net"],
+        startedAt: "2026-06-19T00:00:00Z",
+      }),
+      "utf-8",
+    );
+
+    const result = await sendBatch(
+      client,
+      opts(filePath, { filterOutFile: filterFile, maxSends: 1 }),
+    );
+
+    expect(result.skipped).toBe(1);
+    expect(result.sent).toBe(1);
+    expect(client.sendMessage).toHaveBeenCalledTimes(1);
+    const call = (client.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call[0]).toBe("222@s.whatsapp.net");
+  });
+
   it("sends uniquified messages with numeric suffix", async () => {
     const client = mockClient();
     const filePath = await writeContacts();

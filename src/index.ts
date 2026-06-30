@@ -121,6 +121,7 @@ program
   .option("--message <text>", "Message text to send")
   .option("--message-file <path>", "Path to file containing message text")
   .option("--filter-out <path>", "Path to contacts or send-log JSON file of people to exclude")
+  .option("-n, --max-sends <number>", "Maximum number of messages to send (excludes skipped contacts)")
   .option("--min-delay <seconds>", "Minimum delay between sends in seconds", "15")
   .option("--max-delay <seconds>", "Maximum delay between sends in seconds", "45")
   .option("--dry-run", "Preview recipients without sending", false)
@@ -130,6 +131,7 @@ program
       message?: string;
       messageFile?: string;
       filterOut?: string;
+      maxSends?: string;
       minDelay: string;
       maxDelay: string;
       dryRun: boolean;
@@ -162,6 +164,15 @@ program
         process.exit(1);
       }
 
+      let maxSends: number | undefined;
+      if (opts.maxSends != null) {
+        maxSends = Number(opts.maxSends);
+        if (!Number.isInteger(maxSends) || maxSends <= 0) {
+          console.error("--max-sends must be a positive integer.");
+          process.exit(1);
+        }
+      }
+
       const minDelayMs = Number(opts.minDelay) * 1000;
       const maxDelayMs = Number(opts.maxDelay) * 1000;
       if (!isFinite(minDelayMs) || !isFinite(maxDelayMs) || minDelayMs < 0 || maxDelayMs < 0) {
@@ -190,6 +201,7 @@ program
           message,
           dryRun: opts.dryRun,
           filterOutFile: opts.filterOut,
+          maxSends,
           minDelayMs,
           maxDelayMs,
         });
